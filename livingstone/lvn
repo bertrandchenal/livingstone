@@ -42,13 +42,13 @@ def load(files, args):
         Document.load_file(f)
 
 def main():
-    parser = ArgumentParser(description='Bibimbap is a personal search engine')
+    parser = ArgumentParser(description='Livingstone is a personal search engine')
     parser.add_argument('action', nargs='+', help='action (load, search)')
     parser.add_argument('--page', '-p', type=int, help='Go to page')
     args = parser.parse_args()
 
     action = Action.get(args.action[0])
-    with connect('.bbb.db', action.readonly):
+    with connect('.lvn.db', action.readonly):
         action.launch(args.action[1:], args)
 
 if __name__ == '__main__':
