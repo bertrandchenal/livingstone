@@ -1,0 +1,55 @@
+#! /usr/bin/env python3
+from argparse import ArgumentParser
+
+from config import ctx, connect
+from models import Document, Keyword
+
+# Action allows to define "routes" names to functions
+class Action:
+
+    actions = {}
+
+    def __init__(self, readonly=False):
+        self.readonly = readonly
+
+    def __call__(self, fn):
+        name = fn.__name__
+        self.actions[name] = self
+        self.fn = fn
+        return fn
+
+    @classmethod
+    def get(cls, name, default=None):
+        return cls.actions.get(name, default)
+
+    def launch(self, *args, **kwars):
+        return self.fn(*args, **kwars)
+
+@Action(readonly=True)
+def search(words, args):
+    for doc in Document.search(words, args.page):
+        print(doc)
+
+@Action(readonly=True)
+def suggest(words, args):
+    for res in Keyword.suggest(words):
+        print(res)
+
+@Action()
+def load(files, args):
+    for f in files:
+        print('load', f)
+        Document.load_file(f)
+
+def main():
+    parser = ArgumentParser(description='Bibimbap is a personal search engine')
+    parser.add_argument('action', nargs='+', help='action (load, search)')
+    parser.add_argument('--page', '-p', type=int, help='Go to page')
+    args = parser.parse_args()
+
+    action = Action.get(args.action[0])
+    with connect('.bbb.db', action.readonly):
+        action.launch(args.action[1:], args)
+
+if __name__ == '__main__':
+    main()
