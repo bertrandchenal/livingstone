@@ -1,6 +1,7 @@
 from config import ctx
-from utils import LRU, from_bytes, to_bytes, compress, decompress, ranks
-from parser import parse_file
+from utils import (LRU, from_bytes, to_bytes, compress, decompress, ranks,
+                   to_ascii, get_match_context, limit_offset)
+from parser import parse_text_file, parse_pdf_file
 
 # TODO indexes on score
 init_sql = [
@@ -64,8 +65,9 @@ class Keyword:
                 score = 0
             else:
                 id, score, documents, neighbours = res
-                documents = from_bytes(documents)
-                neighbours = from_bytes(neighbours)
+                documents = 0 if documents is None else from_bytes(documents)
+                neighbours = 0 if neighbours is None else from_bytes(neighbours)
+                score = 0 if score is None else score
             kw = Keyword(id, word, score, documents, neighbours)
             cls.lru.set(word, kw)
         return kw
@@ -78,15 +80,25 @@ class Keyword:
         self.neighbours |= neighbours
 
     @classmethod
-    def suggest(cls, words):
+    def suggest(cls, word):
+        limit, offset = limit_offset()
+        ctx.cursor.execute(
+            "SELECT word from keyword WHERE word like '%s%%' "\
+            "ORDER BY word "\
+            "limit %s offset %s" % (word, limit, offset))
+
+        for w, in ctx.cursor:
+            yield w
+
+    @classmethod
+    def neighbours(cls, words):
         kw_array = None
         for word in words:
-            if isinstance(word, str):
-                word = word.encode()
+            word = to_ascii(word)
 
             kw = Keyword.get(word, readonly=True)
             if not kw:
-                continue
+                return
             if kw_array is None:
                 kw_array = kw.neighbours
             else:
@@ -95,9 +107,9 @@ class Keyword:
         ids = list(ranks(kw_array))
         ctx.cursor.execute(
             'SELECT score, word from keyword WHERE id in (%s) ' \
-            'ORDER BY score asc limit 10' % \
+            'ORDER BY score asc limit 30' % \
             ','.join(str(i) for i in ids))
-        return ctx.cursor
+        yield from ctx.cursor
 
 class Document:
 
@@ -149,12 +161,10 @@ class Document:
         return doc
 
     @classmethod
-    def search(cls, words, page=None):
+    def search(cls, words):
         doc_array = None
+        words = [to_ascii(w) for w in  words]
         for word in words:
-            if isinstance(word, str):
-                word = word.encode()
-
             kw = Keyword.get(word, readonly=True)
             if not kw:
                 continue
@@ -163,17 +173,30 @@ class Document:
             else:
                 doc_array &= kw.documents
 
+        limit, offset = limit_offset()
         ids = list(ranks(doc_array))
         ctx.cursor.execute(
-            'SELECT uri from document WHERE id in (%s) ' \
-            'ORDER BY score desc' % \
-            ','.join(str(i) for i in ids))
-        for uri, in ctx.cursor:
-            yield uri
+            'SELECT uri, content from document WHERE id in (%s) ' \
+            'ORDER BY score desc limit %s offset %s' % (
+                ','.join(str(i) for i in ids), limit, offset)
+        )
+        for uri, content in ctx.cursor:
+            match = None
+            for line in decompress(content).splitlines():
+                line = line.decode()
+                idx = to_ascii(line).find(words[0])
+                if idx < 0:
+                    continue
+                match = get_match_context(idx, line)
+                break
+            yield uri, match
 
     @classmethod
     def load_file(cls, path):
-        content, words = parse_file(path)
+        if path.endswith('.pdf'):
+            content, words = parse_pdf_file(path)
+        else:
+            content, words = parse_text_file(path)
         if not content:
             return
         doc = Document.get(path)

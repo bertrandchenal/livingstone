@@ -1,16 +1,20 @@
 from html.parser import HTMLParser
 from urllib import request
 from urllib.parse import urljoin, urlsplit, urlunsplit
-from unicodedata import normalize
+import codecs
+import subprocess
 import re
 
-word_re = re.compile('\W+')
+from utils import to_ascii
+from config import ctx
+
+word_re = re.compile('[\W+]')
 
 def get_words(data):
     for w in word_re.split(data):
-        w = normalize('NFKD', w).encode('ascii', 'ignore').lower()
+        w = to_ascii(w)
         w.strip()
-        if w:
+        if 1 < len(w) < 20:
             yield w
 
 class DataHTMLParser(HTMLParser):
@@ -46,7 +50,7 @@ class DataHTMLParser(HTMLParser):
         data = self.unescape(data)
         self.words.update(get_words(data))
 
-def parse_url(url):
+def parse_html_url(url):
     f = request.urlopen(url)
     html = f.read()
     parser = DataHTMLParser(['script'], url)
@@ -54,12 +58,24 @@ def parse_url(url):
     parser.feed(html)
     return parser
 
-def parse_file(path):
-    with open(path) as f:
+def parse_text_file(path):
+    encoding = ctx.encoding
+    with codecs.open(path, encoding=encoding) as f:
         try:
             data = f.read()
         except UnicodeDecodeError:
-            print('Unable to load %s as unicode' % path)
+            print('Unable to load %s as %s' % (path, encoding))
             return None, None
         words = get_words(data)
         return data, set(words)
+
+def parse_pdf_file(path):
+    out = subprocess.check_output(['pdftotext', '-enc', 'UTF-8', path, '-'])
+    try:
+        data = out.decode(ctx.encoding)
+    except UnicodeDecodeError:
+        print('Unable to load %s as %s' % (path, ctx.encoding))
+        return None, None
+
+    words = set(get_words(data))
+    return data, words

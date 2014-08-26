@@ -1,7 +1,13 @@
-from bz2 import compress as bz2_compress
-from bz2 import decompress
+from unicodedata import normalize
 
-compress = lambda a: bz2_compress(a, 1)
+from snappy import compress, decompress
+
+from config import ctx
+
+# from gzip import compress as bz2_compress
+# from gzip import decompress
+
+# compress = lambda a: bz2_compress(a, 1)
 
 
 def from_bytes(b):
@@ -14,6 +20,8 @@ def to_bytes(i):
         size = 1 + i.bit_length() // 8
     return compress(i.to_bytes(size, 'big'))
 
+def to_ascii(word):
+    return normalize('NFKD', word).encode('ascii', 'ignore').lower()
 
 def ranks(i):
     while i:
@@ -23,6 +31,19 @@ def ranks(i):
         yield l
         i = i ^ (1 << l)
 
+def get_match_context(idx, line):
+    f = idx - 50
+    t = idx + 50
+    if f < 0:
+        t = t - f
+        f = 0
+    return line[f:t]
+
+def limit_offset():
+    page = ctx.page
+    limit = ctx.length
+    offset = limit * page
+    return limit, offset
 
 class LRU:
 
@@ -71,8 +92,3 @@ class LRU:
     def close(self):
         self.clean(full=True)
 
-
-class Store:
-
-    def __init__(self, **data):
-        self.__dict__.update(data)

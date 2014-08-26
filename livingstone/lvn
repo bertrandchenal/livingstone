@@ -26,30 +26,46 @@ class Action:
         return self.fn(*args, **kwars)
 
 @Action(readonly=True)
-def search(words, args):
-    for doc in Document.search(words, args.page):
-        print(doc)
+def search(words):
+    for doc_uri, match in Document.search(words):
+        print("%s:\n -> %s" % (doc_uri, match))
 
 @Action(readonly=True)
-def suggest(words, args):
-    for res in Keyword.suggest(words):
+def neighbours(words):
+    for res in Keyword.neighbours(words):
         print(res)
 
+@Action(readonly=True)
+def suggest(words):
+    for word in words:
+        for res in Keyword.suggest(word):
+            print(res)
+
 @Action()
-def load(files, args):
+def load(files):
     for f in files:
-        print('load', f)
+        print('load: %s' % f)
         Document.load_file(f)
 
 def main():
     parser = ArgumentParser(description='Livingstone is a personal search engine')
     parser.add_argument('action', nargs='+', help='action (load, search)')
-    parser.add_argument('--page', '-p', type=int, help='Go to page')
-    args = parser.parse_args()
+    parser.add_argument('--page', '-p', action='count', help='Go to page',
+                        default=0)
+    parser.add_argument('--length', '-l', type=int,
+                        help='Page length (default: 10)', default=10)
+    parser.add_argument(
+        '--encoding', '-e', help='Define encoding (default: utf-8',
+        default='utf-8',
+    )
 
-    action = Action.get(args.action[0])
-    with connect('.lvn.db', action.readonly):
-        action.launch(args.action[1:], args)
+    args = vars(parser.parse_args())
+    ctx.update(args)
+
+    action = Action.get(args['action'][0])
+    ctx.readonly = action.readonly
+    with connect('.lvn.db'):
+        action.launch(args['action'][1:])
 
 if __name__ == '__main__':
     main()

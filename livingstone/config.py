@@ -1,12 +1,20 @@
 from contextlib import contextmanager
 import sqlite3
 
-from utils import Store
+class Store:
+
+    def __init__(self, **data):
+        self.__dict__.update(data)
+
+    def update(self, data):
+        self.__dict__.update(data)
+
 
 ctx = Store()
 
 @contextmanager
-def connect(db_path, readonly=False):
+def connect(db_path):
+    readonly = ctx.readonly
     # delayed import to break import loop with models.py
     from models import init_sql, Keyword, Document
     try:
