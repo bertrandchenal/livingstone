@@ -1,24 +1,36 @@
 from unicodedata import normalize
 
-from snappy import compress, decompress
+import snappy
 
 from config import ctx
 
-# from gzip import compress as bz2_compress
-# from gzip import decompress
 
-# compress = lambda a: bz2_compress(a, 1)
+COLORS = {
+    'purple': '\033[95m',
+    'blue': '\033[94m',
+    'green': '\033[92m',
+    'brown': '\033[93m',
+    'red': '\033[91m',
+    'end': '\033[0m',
+}
 
+
+def log(msg, color=None):
+    color = COLORS.get(color)
+    if color:
+        print('%s%s%s' % (color, msg, COLORS['end']))
+    else:
+        print(msg)
 
 def from_bytes(b):
-    return int.from_bytes(decompress(b), 'big')
+    return int.from_bytes(snappy.decompress(b), 'big')
 
 def to_bytes(i):
     if i == 0:
         size = 0
     else:
         size = 1 + i.bit_length() // 8
-    return compress(i.to_bytes(size, 'big'))
+    return snappy.compress(i.to_bytes(size, 'big'))
 
 def to_ascii(word):
     return normalize('NFKD', word).encode('ascii', 'ignore').lower()
@@ -44,6 +56,17 @@ def limit_offset():
     limit = ctx.length
     offset = limit * page
     return limit, offset
+
+def compress(data):
+    if data is None:
+        return None
+    return snappy.compress(data.encode())
+
+def decompress(data):
+    if data is None:
+        return None
+    return snappy.decompress(data).decode()
+
 
 class LRU:
 

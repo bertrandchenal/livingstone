@@ -1,8 +1,23 @@
 #! /usr/bin/env python3
+import sys
 from argparse import ArgumentParser
 
 from config import ctx, connect
 from models import Document, Keyword
+
+def color(s, code):
+    sys.stdout.write('\033[' + str(code) + 'm')
+    sys.stdout.write(s + '\n')
+    sys.stdout.write('\033[' + str(39) + 'm')
+
+def red(s):
+    color(s, 31)
+
+def green(s):
+    color(s, 32)
+
+def blue(s):
+    color(s, 34)
 
 # Action allows to define "routes" names to functions
 class Action:
@@ -27,8 +42,9 @@ class Action:
 
 @Action(readonly=True)
 def search(words):
-    for doc_uri, match in Document.search(words):
-        print("%s:\n -> %s" % (doc_uri, match))
+    for uri, match in Document.search(words):
+        print(uri)
+        blue("-> %s" % match)
 
 @Action(readonly=True)
 def neighbours(words):
@@ -44,8 +60,11 @@ def suggest(words):
 @Action()
 def load(files):
     for f in files:
-        print('load: %s' % f)
         Document.load_file(f)
+
+@Action()
+def crawl(args):
+    Document.crawl()
 
 def main():
     parser = ArgumentParser(description='Livingstone is a personal search engine')

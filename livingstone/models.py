@@ -1,18 +1,23 @@
 from config import ctx
 from utils import (LRU, from_bytes, to_bytes, compress, decompress, ranks,
-                   to_ascii, get_match_context, limit_offset)
-from parser import parse_text_file, parse_pdf_file
+                   to_ascii, get_match_context, limit_offset, log)
+from parser import load
 
 # TODO indexes on score
 init_sql = [
     'CREATE TABLE IF NOT EXISTS keyword (id INTEGER PRIMARY KEY, word VARCHAR, '
     'score INTEGER, documents BLOB, neighbours BLOB)',
-
     'CREATE UNIQUE INDEX IF NOT EXISTS keyword_index on keyword (word)',
 
-    'CREATE TABLE  IF NOT EXISTS document '
-    '(id INTEGER PRIMARY KEY, uri VARCHAR, score INTEGER, content TEXT)',
-
+    'CREATE TABLE IF NOT EXISTS document '
+    '(id INTEGER PRIMARY KEY, '
+    'uri VARCHAR, '
+    'score INTEGER, '
+    'distance INTEGER, '
+    'referer INTEGER, '
+    'content TEXT, '
+    'FOREIGN KEY(referer) REFERENCES document(id)'
+    ')',
     'CREATE UNIQUE INDEX IF NOT EXISTS uri_index on document (uri)',
 ]
 
@@ -106,39 +111,64 @@ class Keyword:
 
         ids = list(ranks(kw_array))
         ctx.cursor.execute(
-            'SELECT score, word from keyword WHERE id in (%s) ' \
+            'SELECT score, word from keyword ' \
+            'WHERE id in (%s) AND score > 1 '\
             'ORDER BY score asc limit 30' % \
             ','.join(str(i) for i in ids))
         yield from ctx.cursor
 
 class Document:
 
-    def __init__(self, id, uri, score=0, content=None):
+    def __init__(self, id, uri, **kw):
         self.id = id
         self.uri = uri
-        self.score = score
-        self.content = content
+        self.score = kw.get('score', 0)
+        self.content = kw.get('content', None)
+        self.referer = kw.get('referer', None)
+        self.distance = kw.get('distance', None)
         self.dirty = False
 
     @classmethod
     def write(cls, uri, document):
         if not document.dirty:
             return
+        content = compress(document.content)
+        ctx.cursor.execute(
+            'UPDATE document SET '
+            'content = ?, '
+            'score = ?, '
+            'referer = ?, '
+            'distance = ? '
+            'WHERE id = ?',
+            (content, document.score, document.referer, document.distance,
+             document.id))
 
-        content = compress(document.content.encode())
-        ctx.cursor.execute('UPDATE document SET content = ?, score = ? '
-                           'WHERE id = ?',
-                           (content, document.score, document.id))
     @classmethod
     def read(cls, uri):
-        ctx.cursor.execute('SELECT id, score, content FROM document '
-                           'WHERE uri = ?', (uri,))
-        return next(ctx.cursor, None)
+        ctx.cursor.execute(
+            'SELECT id, score, content, referer, distance '
+            'FROM document WHERE uri = ?', (uri,))
+
+        res = next(ctx.cursor, None)
+        if res is None:
+            return None
+
+        id, score, content, referer, distance = res
+        if content is not None:
+            content = decompress(content)
+
+        return Document(id, uri, score=score, content=content,
+                        referer=referer, distance=distance)
+
+    @classmethod
+    def delete(cls, uri):
+        ctx.cursor.execute('DELETE FROM document WHERE uri = ?', (uri,))
 
     @classmethod
     def create(cls, uri):
         ctx.cursor.execute('INSERT INTO document (uri) VALUES (?)', (uri,))
-        return ctx.cursor.lastrowid
+        id = ctx.cursor.lastrowid
+        return Document(id, uri)
 
     lru = LRU(size=1000)
 
@@ -147,17 +177,12 @@ class Document:
         doc = cls.lru.get(uri)
         if not doc:
             # Not in lru -> read db
-            res = cls.read(uri)
-            if res is None:
+            doc = cls.read(uri)
+            if doc is None:
                 # Not yet in db -> create row
-                id = cls.create(uri)
-                score = 0
-                content = ''
-            else:
-                id, score, content = res
-                content = decompress(content).decode()
-            doc = Document(id, score, uri)
+                doc = cls.create(uri)
             cls.lru.set(uri, doc)
+
         return doc
 
     @classmethod
@@ -167,7 +192,7 @@ class Document:
         for word in words:
             kw = Keyword.get(word, readonly=True)
             if not kw:
-                continue
+                return
             if doc_array is None:
                 doc_array = kw.documents
             else:
@@ -176,14 +201,14 @@ class Document:
         limit, offset = limit_offset()
         ids = list(ranks(doc_array))
         ctx.cursor.execute(
-            'SELECT uri, content from document WHERE id in (%s) ' \
+            'SELECT uri, content from document ' \
+            'WHERE content is not null and id in (%s) ' \
             'ORDER BY score desc limit %s offset %s' % (
                 ','.join(str(i) for i in ids), limit, offset)
         )
         for uri, content in ctx.cursor:
             match = None
             for line in decompress(content).splitlines():
-                line = line.decode()
                 idx = to_ascii(line).find(words[0])
                 if idx < 0:
                     continue
@@ -193,25 +218,55 @@ class Document:
 
     @classmethod
     def load_file(cls, path):
-        if path.endswith('.pdf'):
-            content, words = parse_pdf_file(path)
-        else:
-            content, words = parse_text_file(path)
+        content, words, links = load(path)
         if not content:
-            return
+            return False
+
         doc = Document.get(path)
         doc.dirty = True
+        if doc.distance is None: # TODO use in_db (inside create()) instead of dirty
+            doc.distance = 0
         doc.content = content
+        log('Document %s loaded (distance: %s, score: %s)' % (
+            path, doc.distance, doc.score),
+            'green')
 
         # Build neighbours
         neighbours = 0
         for word in words:
             kw = Keyword.get(word)
             neighbours |= 1 << kw.id
+
         # Update all keywords
         for word in words:
             kw = Keyword.get(word)
             kw.update(doc, neighbours)
+
+        # Store new links
+        if links:
+            new_dist = doc.distance + 1
+            for link in links:
+                ref = Document.get(link)
+                ref.dirty = True
+                ref.score += 1
+                if ref.distance is None or ref.distance > new_dist:
+                    ref.distance = new_dist
+                    ref.referer = doc.id
+
+        return True
+
+    @classmethod
+    def crawl(cls):
+        ctx.cursor.execute('SELECT uri from document WHERE content is null '
+                           'ORDER BY distance asc, score desc, id asc '
+                           'LIMIT 10')
+        rows = list(ctx.cursor)
+        for row in rows:
+            uri, = row
+            success = cls.load_file(uri)
+            if success:
+                continue
+            cls.delete(uri)
 
 # Plug lru discard methods
 Keyword.lru.discard = Keyword.write
