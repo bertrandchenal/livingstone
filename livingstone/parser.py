@@ -93,8 +93,8 @@ def load(uri):
             content_type = 'text/plain'
 
     if not data:
-        log('No data for %s' % uri, color='red')
-        return None, None
+        log('No content in %s' % uri, color='red')
+        return None, None, None
 
     if content_type == 'text/html':
         return parse_html(data, uri)
@@ -104,7 +104,8 @@ def load(uri):
         return parse_pdf_file(uri)
 
     else:
-        log('Content Type "%s" not supported' % content_type, color='brown')
+        log('Content Type "%s" not supported (%s)' % (content_type, uri) ,
+            color='brown')
 
     return None, None, None
 

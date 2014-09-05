@@ -222,14 +222,27 @@ class Document:
         if not content:
             return False
 
+        if ctx.collect_links:
+            nb = len(links)
+            # Store links
+            cls.store_links(links)
+            if nb > 1:
+                log('%s links collected' % nb, 'green')
+            else:
+                log('%s link collected' % nb, 'green')
+            return True
+
         doc = Document.get(path)
-        doc.dirty = True
-        if doc.distance is None: # TODO use in_db (inside create()) instead of dirty
+        if doc.distance is None:
             doc.distance = 0
+
+        doc.dirty = True
         doc.content = content
         log('Document %s loaded (distance: %s, score: %s)' % (
             path, doc.distance, doc.score),
             'green')
+
+        cls.store_links(links)
 
         # Build neighbours
         neighbours = 0
@@ -242,18 +255,20 @@ class Document:
             kw = Keyword.get(word)
             kw.update(doc, neighbours)
 
-        # Store new links
-        if links:
-            new_dist = doc.distance + 1
-            for link in links:
-                ref = Document.get(link)
-                ref.dirty = True
-                ref.score += 1
-                if ref.distance is None or ref.distance > new_dist:
-                    ref.distance = new_dist
-                    ref.referer = doc.id
-
         return True
+
+    @classmethod
+    def store_links(cls, links, referer=None):
+        ref_dist = referer.distance + 1 if referer else 1
+        ref_id = referer.id if referer else None
+
+        for link in links:
+            new = Document.get(link)
+            new.dirty = True
+            new.score += 1
+            if new.distance is None or new.distance > ref_dist:
+                new.distance = ref_dist
+                new.newerer = ref_id
 
     @classmethod
     def crawl(cls):
