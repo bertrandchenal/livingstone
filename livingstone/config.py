@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import os
 import sqlite3
 
 class Store:
@@ -22,9 +23,10 @@ def connect(db_path):
     readonly = ctx.readonly
     # delayed import to break import loop with models.py
     from models import init_sql, Keyword, Document
+    connection = None
     try:
-        db_path = 'file:%s%s' % (db_path, '?mode=ro' if readonly else '')
-        connection = sqlite3.connect(db_path, uri=True)
+        db_path_mode = 'file:%s%s' % (db_path, '?mode=ro' if readonly else '')
+        connection = sqlite3.connect(db_path_mode, uri=True)
         ctx.cursor = connection.cursor()
         for query in init_sql:
             ctx.cursor.execute(query)
@@ -35,11 +37,14 @@ def connect(db_path):
         Keyword.lru.clean(True)
 
         connection.commit()
-    except:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
 
-def set_config():
-    pass #TODO
+    except sqlite3.OperationalError:
+        connection and connection.rollback()
+        if readonly and not os.path.exists(db_path):
+            exit()
+    except:
+        connection and connection.rollback()
+
+    finally:
+        connection and connection.close()
+
