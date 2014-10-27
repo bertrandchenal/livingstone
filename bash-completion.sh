@@ -16,13 +16,13 @@ _complete () {
         *)
             case "$COMP_CWORD" in
                 "1")
-                    new='load search suggest crawl'
+                    new='add search suggest crawl info neighbours'
                     COMPREPLY=($( compgen -W "$new" -- $cur ))
                     ;;
 
                 *)
                     action=${COMP_WORDS[1]}
-                    if [[ "$action" == "load" ]]; then
+                    if [[ "$action" == "add" ]]; then
                         COMPREPLY=($( compgen -f $cur ))
                     else
                         new=`lvn suggest $cur`
