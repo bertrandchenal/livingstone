@@ -9,6 +9,11 @@ class Store:
     def update(self, data):
         self.__dict__.update(data)
 
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
 
 ctx = Store()
 
