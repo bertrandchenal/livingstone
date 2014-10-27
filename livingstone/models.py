@@ -99,7 +99,7 @@ class Keyword:
     def neighbours(cls, words):
         kw_array = None
         for word in words:
-            word = to_ascii(word)
+            word = to_ascii(word).lower()
 
             kw = Keyword.get(word, readonly=True)
             if not kw:
@@ -188,7 +188,7 @@ class Document:
     @classmethod
     def search(cls, words):
         doc_array = None
-        words = [to_ascii(w) for w in  words]
+        words = [to_ascii(w).lower() for w in  words]
         for word in words:
             kw = Keyword.get(word, readonly=True)
             if not kw:
@@ -209,7 +209,7 @@ class Document:
         for uri, content in ctx.cursor:
             match = None
             for line in decompress(content).splitlines():
-                idx = to_ascii(line).find(words[0])
+                idx = to_ascii(line).lower().find(words[0])
                 if idx < 0:
                     continue
                 match = get_match_context(idx, line)

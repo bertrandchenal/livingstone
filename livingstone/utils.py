@@ -33,7 +33,7 @@ def to_bytes(i):
     return snappy.compress(i.to_bytes(size, 'big'))
 
 def to_ascii(word):
-    return normalize('NFKD', word).encode('ascii', 'ignore').lower()
+    return normalize('NFKD', word).encode('ascii', 'ignore')
 
 def ranks(i):
     while i:
