@@ -3,7 +3,7 @@ Livingstone - A personal search engine
 ======================================
 
 The code is currently beta quality, some parts are missing, the API
-and the databse format will change.
+and the database schema will change.
 
 Usage
 -----
@@ -12,7 +12,7 @@ Example:
 
 .. code-block:: bash
 
-  $ lvn load */*py
+  $ lvn add */*py
   load livingstone/__init__.py
   load livingstone/config.py
   load livingstone/models.py

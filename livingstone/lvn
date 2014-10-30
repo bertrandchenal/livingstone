@@ -1,4 +1,6 @@
 #! /usr/bin/env python3
+import configparser
+import os
 import sys
 from argparse import ArgumentParser
 
@@ -6,18 +8,16 @@ from config import ctx, connect
 from models import Document, Keyword
 
 def color(s, code):
-    sys.stdout.write('\033[' + str(code) + 'm')
-    sys.stdout.write(s + '\n')
-    sys.stdout.write('\033[' + str(39) + 'm')
+    return '\033[%sm%s\033[39m' % (code, s)
 
 def red(s):
-    color(s, 31)
+    return color(s, 31)
 
 def green(s):
-    color(s, 32)
+    return color(s, 32)
 
 def blue(s):
-    color(s, 34)
+    return color(s, 34)
 
 # Action allows to define "routes" names to functions
 class Action:
@@ -42,9 +42,24 @@ class Action:
 
 @Action(readonly=True)
 def search(words):
-    for uri, match in Document.search(words):
-        print(uri)
-        blue("-> %s" % match)
+    for doc_id, uri, match, content in Document.search(words):
+        if ctx.id:
+            print(doc_id)
+            continue
+        print(red(doc_id), uri)
+        print(blue("-> %s" % match))
+
+@Action(readonly=True)
+def read(doc_ids):
+    for doc_id in doc_ids:
+        res = Document.by_id(doc_id)
+        if res:
+            print(res)
+
+@Action()
+def delete(doc_ids):
+    for doc_id in doc_ids:
+        Document.delete(doc_id)
 
 @Action(readonly=True)
 def neighbours(words):
@@ -61,15 +76,30 @@ def suggest(words):
             print(res.decode())
 
 @Action()
-def load(files):
+def add(files):
     for f in files:
-        Document.load_file(f)
+        Document.add_file(f)
 
 @Action()
 def crawl(args):
     Document.crawl()
 
+@Action()
+def info(args):
+    Document.info()
+    Keyword.info()
+
 def main():
+
+    config_file = os.path.expanduser('~/.lvn.cfg')
+    config = configparser.ConfigParser()
+    # The default optionxform converts key to lowercase
+    config.optionxform = str
+    config.read(config_file)
+
+    for key in config['main']:
+        ctx[key] = config['main'][key]
+
     parser = ArgumentParser(
         description='Livingstone is a personal search engine',
         add_help=False,
@@ -80,6 +110,7 @@ def main():
                         help='Page length (default: 10)', default=10)
     parser.add_argument('--collect-links', '-c', action='store_true',
                         help='Collect link (do not parse other contents)')
+    parser.add_argument('--id', action='store_true', help='Show only id')
     parser.add_argument(
         '--encoding', '-e', help='Define encoding (default: utf-8',
         default='utf-8',

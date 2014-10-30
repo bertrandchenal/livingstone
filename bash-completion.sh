@@ -16,7 +16,7 @@ _complete () {
         *)
             case "$COMP_CWORD" in
                 "1")
-                    new='add search suggest crawl info neighbours'
+                    new='add search suggest crawl info neighbours read'
                     COMPREPLY=($( compgen -W "$new" -- $cur ))
                     ;;
 

@@ -15,6 +15,7 @@ init_sql = [
     'score INTEGER, '
     'distance INTEGER, '
     'referer INTEGER, '
+    'timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, '
     'content TEXT, '
     'FOREIGN KEY(referer) REFERENCES document(id)'
     ')',
@@ -112,10 +113,16 @@ class Keyword:
         ids = list(ranks(kw_array))
         ctx.cursor.execute(
             'SELECT score, word from keyword ' \
-            'WHERE id in (%s) AND score > 1 '\
+            'WHERE id in (%s) '\
             'ORDER BY score asc limit 30' % \
             ','.join(str(i) for i in ids))
         yield from ctx.cursor
+
+    @classmethod
+    def info(cls):
+        ctx.cursor.execute('SELECT count(1) from keyword')
+        cnt,  = ctx.cursor.fetchone()
+        log('Number of keywords in db: %s' % cnt)
 
 class Document:
 
@@ -126,6 +133,7 @@ class Document:
         self.content = kw.get('content', None)
         self.referer = kw.get('referer', None)
         self.distance = kw.get('distance', None)
+        self.is_new = kw.get('is_new', None)
         self.dirty = False
 
     @classmethod
@@ -161,14 +169,29 @@ class Document:
                         referer=referer, distance=distance)
 
     @classmethod
-    def delete(cls, uri):
-        ctx.cursor.execute('DELETE FROM document WHERE uri = ?', (uri,))
+    def by_id(cls, doc_id):
+        ctx.cursor.execute(
+            'SELECT content '
+            'FROM document WHERE id = ?', (doc_id,))
+
+        res = next(ctx.cursor, None)
+        if res is None:
+            return None
+        content, = res
+        if content is not None:
+            content = decompress(content)
+
+        return content
+
+    @classmethod
+    def delete(cls, doc_id):
+        ctx.cursor.execute('DELETE FROM document WHERE id = ?', (doc_id,))
 
     @classmethod
     def create(cls, uri):
         ctx.cursor.execute('INSERT INTO document (uri) VALUES (?)', (uri,))
         id = ctx.cursor.lastrowid
-        return Document(id, uri)
+        return Document(id, uri, is_new=True)
 
     lru = LRU(size=1000)
 
@@ -201,12 +224,12 @@ class Document:
         limit, offset = limit_offset()
         ids = list(ranks(doc_array))
         ctx.cursor.execute(
-            'SELECT uri, content from document ' \
+            'SELECT id, uri, content from document ' \
             'WHERE content is not null and id in (%s) ' \
             'ORDER BY score desc limit %s offset %s' % (
                 ','.join(str(i) for i in ids), limit, offset)
         )
-        for uri, content in ctx.cursor:
+        for doc_id, uri, content in ctx.cursor:
             match = None
             for line in decompress(content).splitlines():
                 idx = to_ascii(line).lower().find(words[0])
@@ -214,23 +237,23 @@ class Document:
                     continue
                 match = get_match_context(idx, line)
                 break
-            yield uri, match
+            yield doc_id, uri, match, content
 
     @classmethod
-    def load_file(cls, path):
+    def add_file(cls, path):
         content, words, links = load(path)
+
+        if (not content and links) or ctx.collect_links:
+            # Store links
+            new_cnt = cls.store_links(links)
+            if new_cnt > 1:
+                log('%s links collected' % new_cnt, 'green')
+            else:
+                log('%s link collected' % new_cnt, 'green')
+            return True
+
         if not content:
             return False
-
-        if ctx.collect_links:
-            nb = len(links)
-            # Store links
-            cls.store_links(links)
-            if nb > 1:
-                log('%s links collected' % nb, 'green')
-            else:
-                log('%s link collected' % nb, 'green')
-            return True
 
         doc = Document.get(path)
         if doc.distance is None:
@@ -238,11 +261,11 @@ class Document:
 
         doc.dirty = True
         doc.content = content
-        log('Document %s loaded (distance: %s, score: %s)' % (
+        log('Document %s added (distance: %s, score: %s)' % (
             path, doc.distance, doc.score),
             'green')
 
-        cls.store_links(links)
+        cls.store_links(links, doc)
 
         # Build neighbours
         neighbours = 0
@@ -262,26 +285,44 @@ class Document:
         ref_dist = referer.distance + 1 if referer else 1
         ref_id = referer.id if referer else None
 
+        new_cnt = 0
         for link in links:
             new = Document.get(link)
+            if new.is_new:
+                new_cnt += 1
             new.dirty = True
             new.score += 1
             if new.distance is None or new.distance > ref_dist:
                 new.distance = ref_dist
                 new.newerer = ref_id
+        return new_cnt
 
     @classmethod
     def crawl(cls):
-        ctx.cursor.execute('SELECT uri from document WHERE content is null '
-                           'ORDER BY distance asc, score desc, id asc '
-                           'LIMIT 10')
+        ctx.cursor.execute('SELECT id, uri from document WHERE content is null '
+                           'ORDER BY distance asc, id asc '
+                           'LIMIT ?', (ctx.length,))
         rows = list(ctx.cursor)
         for row in rows:
-            uri, = row
-            success = cls.load_file(uri)
+            doc_id, uri = row
+            success = cls.add_file(uri)
             if success:
                 continue
-            cls.delete(uri)
+            cls.delete(doc_id)
+
+    @classmethod
+    def info(cls):
+        ctx.cursor.execute('SELECT count(1), max(distance) from document '
+                           'where content is not null')
+        cnt, dist = ctx.cursor.fetchone()
+
+        ctx.cursor.execute('SELECT count(1) from document '
+                           'where content is null')
+        null_cnt,  = ctx.cursor.fetchone()
+
+        log('Number of documents in db: %s' % cnt)
+        log('Biggest document distance: %s' % dist)
+        log('Number of link to crawl: %s' % null_cnt)
 
 # Plug lru discard methods
 Keyword.lru.discard = Keyword.write

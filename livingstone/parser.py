@@ -3,8 +3,10 @@ from urllib import request
 from urllib.error import URLError
 from urllib.parse import urljoin, urlsplit, urlunsplit
 import codecs
+import os
 import socket
 import subprocess
+import sqlite3
 import re
 
 from utils import to_ascii, log
@@ -14,7 +16,7 @@ word_re = re.compile('[\W+]')
 
 def get_words(data):
     for w in word_re.split(data):
-        w = to_ascii(w)
+        w = to_ascii(w).lower()
         w.strip()
         if 1 < len(w) < 20:
             yield w
@@ -61,15 +63,22 @@ class DataHTMLParser(HTMLParser):
 
 
 def load(uri):
+    """
+    return: content, words, links.
+    """
     content_type = None
     charset = None
+
+    if uri == ':firefox':
+        links = load_firefox_places()
+        return None, None, list(links)
+
     scheme, *_ = urlsplit(uri)
     if scheme:
         try:
-            # Urllib expect ascii urls
             uri = to_ascii(uri).decode()
             f = request.urlopen(uri, timeout=5)
-        except (URLError, socket.error):
+        except (URLError, socket.error) as e:
             log('Unable to download %s' % uri, color='red')
             return None, None, None
 
@@ -140,3 +149,25 @@ def parse_pdf_file(path):
 
     words = set(get_words(data))
     return data, words, None
+
+def load_firefox_places():
+
+    path = ctx.get('firefox_profile')
+    if not path:
+        log('Option "firefox_profile" path undefined, '
+            'please set it under "main" section inside ~/.lvn.cfg', 'red')
+        return
+
+    path = os.path.expanduser(path)
+    if not os.path.isdir(path):
+        log('Path %s not found (as defined by the firefox_profile option)',
+            'red')
+        return
+
+    db = os.path.join(path, 'places.sqlite')
+    db = 'file:%s%s' % (db, '?mode=ro')
+    with sqlite3.connect(db, uri=True) as conn:
+        cur = conn.cursor()
+        cur.execute('select url from moz_places where title is not null')
+        for row in cur:
+            yield row[0]
